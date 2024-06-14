@@ -257,6 +257,7 @@ If the asset token itself has vulnerabilities (like an inflationary mint bug), i
 
 - The prototype needs to be improved, made more gas-efficient, specially the updateProfit modifier, which is called often.
 - I would look into using EIP 4626 to standardize the interface of this contract, for use in defi.
+- We can add extra safety checks regarding the movement of funds into the strategy, perhaps with checking if the destination is a smart contract, if it's an ERC20 receiver, etc.
 - The contract needs to be fully tested, using foundry, with fuzzing and as much randomization as possible. See testing sub section.
 - The way that funds go in and out of strategies needs to be standardized, by making a `IInvestmentStrategy` interface. This interface would define how to interact with the strategy and include further information on the strategy. In fact, if a strategy is for a defi protocol, it can even be expanded upon to include implementations that interact with the defi contracts.
 - The contract needs to be audited.
