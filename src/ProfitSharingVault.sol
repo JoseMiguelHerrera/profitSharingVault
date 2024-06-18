@@ -31,7 +31,7 @@ contract ProfitSharingVault is AccessControl {
 
     uint256 constant PROFIT_PER_TOKEN_SCALE_FACTOR = 1e18;
 
-    IERC20 public asset; //The asset that will be locked
+    IERC20 public immutable asset; //The asset that will be locked
 
     InvestmentStrategy public strategy;
 
@@ -58,7 +58,7 @@ contract ProfitSharingVault is AccessControl {
     //errors
     error ExistingWithdrawRequest(address user);
     error CannotCancelWithdrawRequest(address user);
-    error CannotProcessWithdrawRequest(address user,string reason);
+    error CannotProcessWithdrawRequest(address user, string reason);
 
     bytes32 public constant WITHDRAW_ADMIN_ROLE = keccak256("WITHDRAW_ADMIN_ROLE");
     bytes32 public constant PROFIT_DISTRO_ROLE = keccak256("PROFIT_DISTRO_ROLE");
@@ -73,31 +73,24 @@ contract ProfitSharingVault is AccessControl {
         address defaultWithDrawAdmin
     ) {
         asset = IERC20(_asset);
-        strategy = InvestmentStrategy(
-            strategyAddress,
-            strategyUri,
-            strategyName,
-            strategyIsSmartWallet
-        );
+        strategy = InvestmentStrategy(strategyAddress, strategyUri, strategyName, strategyIsSmartWallet);
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(PROFIT_DISTRO_ROLE, defaultProfitDistributor);
         _grantRole(WITHDRAW_ADMIN_ROLE, defaultWithDrawAdmin);
     }
 
     modifier updateProfit(address account) {
-
         //this can never underflow, because it is a subtraction of a value that always goes up, minus a previous snapshot of that value.
-        uint256 _newProfitSincePreviousUpdate = profitPerTokenStored -
-            lastProfitPerTokenPaid[account];
+        uint256 _newProfitSincePreviousUpdate = profitPerTokenStored - lastProfitPerTokenPaid[account];
 
-        unclaimedProfits[account] += ((balances[account] * _newProfitSincePreviousUpdate) /
-            PROFIT_PER_TOKEN_SCALE_FACTOR);
+        unclaimedProfits[account] +=
+            ((balances[account] * _newProfitSincePreviousUpdate) / PROFIT_PER_TOKEN_SCALE_FACTOR);
 
         lastProfitPerTokenPaid[account] = profitPerTokenStored; //set the current total profit per token as the latest for this user
         _;
     }
 
-    modifier blockIfHalted(){
+    modifier blockIfHalted() {
         require(!halted, "halted");
         _;
     }
@@ -110,37 +103,20 @@ contract ProfitSharingVault is AccessControl {
     ) public onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newStrategyAddress != address(0), "ZERO_ADDRESS");
         InvestmentStrategy memory oldStrategy = strategy;
-        strategy = InvestmentStrategy(
-            newStrategyAddress,
-            newUri,
-            newName,
-            newIsSmartWallet
-        );
+        strategy = InvestmentStrategy(newStrategyAddress, newUri, newName, newIsSmartWallet);
         if (oldStrategy.isSmartWallet) {
-            require(
-                asset.transferFrom(
-                    oldStrategy.strategyAddress,
-                    newStrategyAddress,
-                    totalDeposited
-                ),
-                "ERC20TXERR"
-            );
+            require(asset.transferFrom(oldStrategy.strategyAddress, newStrategyAddress, totalDeposited), "ERC20TXERR");
         } else {
             require(
-                asset.balanceOf(address(this)) >=
-                    totalDeposited + totalProfitPool,
-                "SEND STRATEGY FUNDS TO VAULT FIRST"
+                asset.balanceOf(address(this)) >= totalDeposited + totalProfitPool, "SEND STRATEGY FUNDS TO VAULT FIRST"
             );
-            require(
-                asset.transfer(newStrategyAddress, totalDeposited),
-                "ERC20TXERR"
-            );
+            require(asset.transfer(newStrategyAddress, totalDeposited), "ERC20TXERR");
         }
     }
 
-    function changeHaltStatus(bool _newHaltStatus) public onlyRole(DEFAULT_ADMIN_ROLE){
-        require(_newHaltStatus!=halted,"same halt status");
-        halted=_newHaltStatus;
+    function changeHaltStatus(bool _newHaltStatus) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_newHaltStatus != halted, "same halt status");
+        halted = _newHaltStatus;
         emit HaltStatusChanged(_newHaltStatus);
     }
 
@@ -148,30 +124,19 @@ contract ProfitSharingVault is AccessControl {
         require(amount > 0, "Amount must be positive");
         totalDeposited += amount;
         balances[msg.sender] += amount;
-        require(
-            asset.transferFrom(msg.sender, strategy.strategyAddress, amount),
-            "ERC20TXERR"
-        );
+        require(asset.transferFrom(msg.sender, strategy.strategyAddress, amount), "ERC20TXERR");
         emit Deposited(msg.sender, amount);
     }
 
-    function withdrawRequest(uint256 amount) blockIfHalted external {
-        require(amount>0,"invalid amount");
+    function withdrawRequest(uint256 amount) external blockIfHalted {
+        require(amount > 0, "invalid amount");
         require(amount <= balances[msg.sender], "Insufficient user balance");
         WithdrawRequest memory currentRequest = withdrawRequests[msg.sender];
 
-        if (
-            currentRequest.user == address(0) ||
-            currentRequest.status != WithdrawRequestStatus.CREATED
-        ) {
+        if (currentRequest.user == address(0) || currentRequest.status != WithdrawRequestStatus.CREATED) {
             //no request ever has been made or previous request has been processed, can write fresh request
-            withdrawRequests[msg.sender] = WithdrawRequest(
-                msg.sender,
-                amount,
-                block.timestamp,
-                block.timestamp,
-                WithdrawRequestStatus.CREATED
-            );
+            withdrawRequests[msg.sender] =
+                WithdrawRequest(msg.sender, amount, block.timestamp, block.timestamp, WithdrawRequestStatus.CREATED);
         } else {
             revert ExistingWithdrawRequest(msg.sender); //needs to be be processed or cancelled
         }
@@ -179,22 +144,28 @@ contract ProfitSharingVault is AccessControl {
     }
 
     function cancelRequest() external {
-        if(withdrawRequests[msg.sender].user!=address(0)&& withdrawRequests[msg.sender].status==WithdrawRequestStatus.CREATED){
-            withdrawRequests[msg.sender].status=WithdrawRequestStatus.CANCELLED;
-            withdrawRequests[msg.sender].lastUpdateTime=block.timestamp;
-        }else{
+        if (
+            withdrawRequests[msg.sender].user != address(0)
+                && withdrawRequests[msg.sender].status == WithdrawRequestStatus.CREATED
+        ) {
+            withdrawRequests[msg.sender].status = WithdrawRequestStatus.CANCELLED;
+            withdrawRequests[msg.sender].lastUpdateTime = block.timestamp;
+        } else {
             revert CannotCancelWithdrawRequest(msg.sender);
         }
         emit CancelledWithdrawRequest(msg.sender);
     }
 
     function processWithdraw(address user) external blockIfHalted onlyRole(WITHDRAW_ADMIN_ROLE) updateProfit(user) {
-        require(user!=address(0),"invalid address");
-        if(withdrawRequests[msg.sender].user==address(0)){
-            revert CannotProcessWithdrawRequest(user,"Non existant request");
+        require(user != address(0), "invalid address");
+        if (withdrawRequests[msg.sender].user == address(0)) {
+            revert CannotProcessWithdrawRequest(user, "Non existant request");
         }
-        if(withdrawRequests[msg.sender].user!=address(0) && withdrawRequests[msg.sender].status!=WithdrawRequestStatus.CREATED){
-            revert CannotProcessWithdrawRequest(user,"Request must be in created state");
+        if (
+            withdrawRequests[msg.sender].user != address(0)
+                && withdrawRequests[msg.sender].status != WithdrawRequestStatus.CREATED
+        ) {
+            revert CannotProcessWithdrawRequest(user, "Request must be in created state");
         }
         WithdrawRequest memory currentRequest = withdrawRequests[user];
 
@@ -204,24 +175,24 @@ contract ProfitSharingVault is AccessControl {
         balances[msg.sender] -= currentRequest.withdrawRequestAmount;
         totalDeposited -= currentRequest.withdrawRequestAmount;
 
-        withdrawRequests[msg.sender].lastUpdateTime=block.timestamp;
-        withdrawRequests[msg.sender].status=WithdrawRequestStatus.WITHDRAWN;
+        withdrawRequests[msg.sender].lastUpdateTime = block.timestamp;
+        withdrawRequests[msg.sender].status = WithdrawRequestStatus.WITHDRAWN;
 
-        require(asset.transfer(user,currentRequest.withdrawRequestAmount),"ERC20TXERR");
+        require(asset.transfer(user, currentRequest.withdrawRequestAmount), "ERC20TXERR");
 
         emit Withdrawn(user, currentRequest.withdrawRequestAmount);
     }
 
-    function returnProfits(uint256 profitAmount,address profitSource) external blockIfHalted onlyRole(PROFIT_DISTRO_ROLE) {
+    function returnProfits(uint256 profitAmount, address profitSource)
+        external
+        blockIfHalted
+        onlyRole(PROFIT_DISTRO_ROLE)
+    {
         require(totalDeposited > 0, "no deposits");
         totalProfitPool += profitAmount;
-        profitPerTokenStored += ((profitAmount *
-            PROFIT_PER_TOKEN_SCALE_FACTOR) / totalDeposited); //update profit per token stored, note this needs to be scaled to avoid truncating to zero
-        
-        require(
-            asset.transferFrom(profitSource, address(this), profitAmount),
-            "ERC20TXERR"
-        );
+        profitPerTokenStored += ((profitAmount * PROFIT_PER_TOKEN_SCALE_FACTOR) / totalDeposited); //update profit per token stored, note this needs to be scaled to avoid truncating to zero
+
+        require(asset.transferFrom(profitSource, address(this), profitAmount), "ERC20TXERR");
         emit ProfitsReturned(profitAmount);
     }
 
@@ -242,10 +213,7 @@ contract ProfitSharingVault is AccessControl {
         totalDeposited += profit;
         balances[msg.sender] += profit;
         totalProfitPool -= profit;
-        require(
-            asset.transfer(strategy.strategyAddress, profit),
-            "ERC20TXERR"
-        );
+        require(asset.transfer(strategy.strategyAddress, profit), "ERC20TXERR");
         emit Reinvested(msg.sender, profit);
     }
 }
